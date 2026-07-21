@@ -10,6 +10,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.ApplicationContext;
+import org.springframework.core.env.Environment;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -59,11 +60,19 @@ class TracingIT {
     @Autowired
     private ApplicationContext applicationContext;
 
+    @Autowired
+    private Environment environment;
+
     private final TestRestTemplate restTemplate = new TestRestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
     void placingAnOrderProducesATraceWithMultipleLinkedSpansInZipkin() throws Exception {
+        System.out.println("[TracingIT] Configured zipkin endpoint: "
+            + environment.getProperty("management.zipkin.tracing.endpoint"));
+        ResponseEntity<String> zipkinHealth = restTemplate.getForEntity(zipkinUrl("/health"), String.class);
+        System.out.println("[TracingIT] Zipkin health check: " + zipkinHealth.getStatusCode() + " " + zipkinHealth.getBody());
+
         OrderRequest request = new OrderRequest("customer-1", List.of("widget", "gadget"), new BigDecimal("40.00"));
 
         OrderResult result = restTemplate.postForObject(url("/api/orders"), request, OrderResult.class);
