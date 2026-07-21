@@ -35,7 +35,12 @@ import static org.awaitility.Awaitility.await;
  * payment client spans, and the manually-created shipping-cost span.
  */
 @Testcontainers
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = {
+        "logging.level.zipkin2=DEBUG",
+        "logging.level.io.micrometer.tracing=DEBUG",
+        "logging.level.brave=DEBUG"
+    })
 class TracingIT {
 
     @Container
@@ -71,11 +76,14 @@ class TracingIT {
         // background timer, which is what actually explained CI reliably timing out at 30s with
         // zero successful polls while a local run saw the trace appear in ~1.7s: whatever the
         // exact timer/thread-scheduling difference was, forcing the flush sidesteps it entirely.
-        applicationContext.getBeansOfType(Flushable.class).values().forEach(flushable -> {
+        var flushables = applicationContext.getBeansOfType(Flushable.class);
+        System.out.println("[TracingIT] Flushable beans found: " + flushables.keySet());
+        flushables.forEach((name, flushable) -> {
             try {
                 flushable.flush();
-            } catch (IOException ignored) {
-                // best-effort — the Awaitility poll below is still the real assertion
+                System.out.println("[TracingIT] Flushed bean: " + name);
+            } catch (IOException e) {
+                System.out.println("[TracingIT] Flush FAILED for bean " + name + ": " + e);
             }
         });
 
