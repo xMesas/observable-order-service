@@ -1,0 +1,7 @@
+services:
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: observable-order-zipkin
+    restart: unless-stopped
+    ports:
+      - "9411:9411"
