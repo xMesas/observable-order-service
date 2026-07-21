@@ -5,9 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xmesas.observability.order.OrderRequest;
 import com.xmesas.observability.order.OrderResult;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.ApplicationContext;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -16,6 +18,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.io.Flushable;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
@@ -47,6 +51,9 @@ class TracingIT {
     @LocalServerPort
     int port;
 
+    @Autowired
+    private ApplicationContext applicationContext;
+
     private final TestRestTemplate restTemplate = new TestRestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -59,7 +66,20 @@ class TracingIT {
         assertThat(result.status()).isEqualTo("PLACED");
         assertThat(result.traceId()).isNotBlank();
 
-        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
+        // Both Brave's AsyncReporter and AsyncZipkinSpanHandler implement Flushable — forcing a
+        // flush here makes the export deterministic instead of depending on the reporter's own
+        // background timer, which is what actually explained CI reliably timing out at 30s with
+        // zero successful polls while a local run saw the trace appear in ~1.7s: whatever the
+        // exact timer/thread-scheduling difference was, forcing the flush sidesteps it entirely.
+        applicationContext.getBeansOfType(Flushable.class).values().forEach(flushable -> {
+            try {
+                flushable.flush();
+            } catch (IOException ignored) {
+                // best-effort — the Awaitility poll below is still the real assertion
+            }
+        });
+
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
             // Span export to Zipkin is asynchronous, so the trace often isn't queryable yet on
             // the first poll — Zipkin returns 404 with a plain-text body (not JSON) until it is.
             // Awaitility's untilAsserted only retries on AssertionError, so the status check has
