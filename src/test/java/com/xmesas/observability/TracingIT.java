@@ -45,8 +45,12 @@ import static org.awaitility.Awaitility.await;
     })
 class TracingIT {
 
+    // Pinned to a specific digest, not :latest — a version drift between what got pulled
+    // locally (already cached, worked perfectly) versus whatever :latest resolves to on a
+    // fresh CI pull is a real, unverified suspect for CI-only span-export failures seen here.
     @Container
-    static GenericContainer<?> zipkin = new GenericContainer<>(DockerImageName.parse("openzipkin/zipkin:latest"))
+    static GenericContainer<?> zipkin = new GenericContainer<>(DockerImageName.parse(
+        "openzipkin/zipkin@sha256:d17e856dcbba7ffeefbbfc252f89ab78a4ab6faed47e646d46daad78f91b5ee2"))
         .withExposedPorts(9411);
 
     @DynamicPropertySource
