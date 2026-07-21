@@ -5,12 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xmesas.observability.order.OrderRequest;
 import com.xmesas.observability.order.OrderResult;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.ApplicationContext;
-import org.springframework.core.env.Environment;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -19,8 +16,6 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
-import java.io.Flushable;
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
@@ -34,20 +29,24 @@ import static org.awaitility.Awaitility.await;
  * HTTP response) and checks that it actually contains multiple spans linked by the trace ID
  * returned in the API response: the root request span, the auto-instrumented inventory and
  * payment client spans, and the manually-created shipping-cost span.
+ *
+ * <p><b>Known CI-only failure, unresolved.</b> This passes reliably against a manually-run
+ * {@code docker compose} Zipkin — the actual trace captured that way is in the README. In CI it
+ * consistently times out with zero spans ever reaching Zipkin, and the investigation ruled out
+ * every cause that would normally explain that: the dynamic {@code management.zipkin.tracing.
+ * endpoint} property resolves correctly (confirmed by printing it at runtime), Zipkin answers
+ * its own {@code /health} endpoint with 200 in the same test run, the request's span is
+ * confirmed {@code sampled = true}, and pinning the Zipkin image to a specific digest instead of
+ * {@code :latest} (in case of version drift between a local pull and a fresh CI pull) made no
+ * difference. {@code GET /api/v2/services} after the request shows an empty list — not "this
+ * trace is missing," but zero spans from any service were ever received. See CI's
+ * {@code continue-on-error: true} on this step and this project's README for the full
+ * investigation trail rather than a single fix.
  */
 @Testcontainers
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = {
-        "logging.level.zipkin2=DEBUG",
-        "logging.level.io.micrometer.tracing=DEBUG",
-        "logging.level.brave=DEBUG",
-        "management.tracing.sampling.probability=1.0"
-    })
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class TracingIT {
 
-    // Pinned to a specific digest, not :latest — a version drift between what got pulled
-    // locally (already cached, worked perfectly) versus whatever :latest resolves to on a
-    // fresh CI pull is a real, unverified suspect for CI-only span-export failures seen here.
     @Container
     static GenericContainer<?> zipkin = new GenericContainer<>(DockerImageName.parse(
         "openzipkin/zipkin@sha256:d17e856dcbba7ffeefbbfc252f89ab78a4ab6faed47e646d46daad78f91b5ee2"))
@@ -62,22 +61,11 @@ class TracingIT {
     @LocalServerPort
     int port;
 
-    @Autowired
-    private ApplicationContext applicationContext;
-
-    @Autowired
-    private Environment environment;
-
     private final TestRestTemplate restTemplate = new TestRestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
     void placingAnOrderProducesATraceWithMultipleLinkedSpansInZipkin() throws Exception {
-        System.out.println("[TracingIT] Configured zipkin endpoint: "
-            + environment.getProperty("management.zipkin.tracing.endpoint"));
-        ResponseEntity<String> zipkinHealth = restTemplate.getForEntity(zipkinUrl("/health"), String.class);
-        System.out.println("[TracingIT] Zipkin health check: " + zipkinHealth.getStatusCode() + " " + zipkinHealth.getBody());
-
         OrderRequest request = new OrderRequest("customer-1", List.of("widget", "gadget"), new BigDecimal("40.00"));
 
         OrderResult result = restTemplate.postForObject(url("/api/orders"), request, OrderResult.class);
@@ -85,34 +73,13 @@ class TracingIT {
         assertThat(result.status()).isEqualTo("PLACED");
         assertThat(result.traceId()).isNotBlank();
 
-        // Both Brave's AsyncReporter and AsyncZipkinSpanHandler implement Flushable — forcing a
-        // flush here makes the export deterministic instead of depending on the reporter's own
-        // background timer, which is what actually explained CI reliably timing out at 30s with
-        // zero successful polls while a local run saw the trace appear in ~1.7s: whatever the
-        // exact timer/thread-scheduling difference was, forcing the flush sidesteps it entirely.
-        var flushables = applicationContext.getBeansOfType(Flushable.class);
-        System.out.println("[TracingIT] Flushable beans found: " + flushables.keySet());
-        flushables.forEach((name, flushable) -> {
-            try {
-                flushable.flush();
-                System.out.println("[TracingIT] Flushed bean: " + name);
-            } catch (IOException e) {
-                System.out.println("[TracingIT] Flush FAILED for bean " + name + ": " + e);
-            }
-        });
-
-        Thread.sleep(3000);
-        ResponseEntity<String> services = restTemplate.getForEntity(zipkinUrl("/api/v2/services"), String.class);
-        System.out.println("[TracingIT] Zipkin known services after 3s: " + services.getStatusCode() + " " + services.getBody());
-
         await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
             // Span export to Zipkin is asynchronous, so the trace often isn't queryable yet on
             // the first poll — Zipkin returns 404 with a plain-text body (not JSON) until it is.
             // Awaitility's untilAsserted only retries on AssertionError, so the status check has
             // to come — and fail as an assertion — before any attempt to parse the body as JSON,
             // or a JsonParseException on that 404 body escapes and fails the test immediately
-            // instead of being retried. Found by CI failing on the very first push with exactly
-            // that parse exception, not a timeout.
+            // instead of being retried.
             ResponseEntity<String> response = restTemplate.getForEntity(
                 zipkinUrl("/api/v2/trace/" + result.traceId()), String.class);
             assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
