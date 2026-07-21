@@ -97,6 +97,10 @@ class TracingIT {
             }
         });
 
+        Thread.sleep(3000);
+        ResponseEntity<String> services = restTemplate.getForEntity(zipkinUrl("/api/v2/services"), String.class);
+        System.out.println("[TracingIT] Zipkin known services after 3s: " + services.getStatusCode() + " " + services.getBody());
+
         await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
             // Span export to Zipkin is asynchronous, so the trace often isn't queryable yet on
             // the first poll — Zipkin returns 404 with a plain-text body (not JSON) until it is.
