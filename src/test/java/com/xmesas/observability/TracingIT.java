@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -59,8 +60,18 @@ class TracingIT {
         assertThat(result.traceId()).isNotBlank();
 
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
-            String body = restTemplate.getForObject(zipkinUrl("/api/v2/trace/" + result.traceId()), String.class);
-            JsonNode spans = objectMapper.readTree(body);
+            // Span export to Zipkin is asynchronous, so the trace often isn't queryable yet on
+            // the first poll — Zipkin returns 404 with a plain-text body (not JSON) until it is.
+            // Awaitility's untilAsserted only retries on AssertionError, so the status check has
+            // to come — and fail as an assertion — before any attempt to parse the body as JSON,
+            // or a JsonParseException on that 404 body escapes and fails the test immediately
+            // instead of being retried. Found by CI failing on the very first push with exactly
+            // that parse exception, not a timeout.
+            ResponseEntity<String> response = restTemplate.getForEntity(
+                zipkinUrl("/api/v2/trace/" + result.traceId()), String.class);
+            assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+
+            JsonNode spans = objectMapper.readTree(response.getBody());
 
             // Root request span + inventory client span + shipping-cost span + payment client
             // span, at minimum — exact count depends on instrumentation detail, so this checks

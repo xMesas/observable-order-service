@@ -48,6 +48,8 @@ And `/actuator/prometheus` showed `orders_placed_total 1.0` and a populated `ord
 
 **The "downstream services" are this same app calling itself.** Same trade-off as `resilient-payment-client`: a real system would call genuinely separate services, but a same-app loopback HTTP call (see `ServerPortHolder`) produces real client/server span pairs without needing a second deployable service or Testcontainers-across-multiple-images to demonstrate multi-hop tracing.
 
+**Awaitility's `untilAsserted` only retries on `AssertionError` — a parse exception on the "not ready yet" response escapes instead of being retried.** Span export to Zipkin is asynchronous, so `TracingIT`'s first poll usually hits Zipkin before the trace is queryable, and Zipkin answers with a 404 and a plain-text body, not JSON. The first version of the test tried to `objectMapper.readTree()` that body immediately — CI failed on the very first push with a `JsonParseException`, not a timeout, because Awaitility has no way to know a parse exception means "keep waiting" instead of "genuinely broken." The fix is asserting the response status is 2xx *before* attempting to parse anything: a 404 now fails as a plain `AssertionError`, which Awaitility retries correctly.
+
 **Sampling probability is 1.0 — sample everything.** A real production service would sample a small percentage of requests (tracing every request at scale is expensive to store and mostly redundant signal). This project needs every request traced to be verifiable in a test and inspectable by hand; tuning the sampling rate down would be one of the first things to change before this pattern went into a real service.
 
 ## Stack
