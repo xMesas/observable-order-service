@@ -68,6 +68,8 @@ public class OrderService {
 
                 Span currentSpan = tracer.currentSpan();
                 String traceId = currentSpan != null ? currentSpan.context().traceId() : "unknown";
+                Boolean sampled = currentSpan != null ? currentSpan.context().sampled() : null;
+                log.info("Order {} trace sampled = {}", orderId, sampled);
                 return new OrderResult(orderId, "PLACED", traceId);
             } catch (RuntimeException e) {
                 ordersFailedCounter.increment();

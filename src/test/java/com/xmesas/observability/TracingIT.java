@@ -40,7 +40,8 @@ import static org.awaitility.Awaitility.await;
     properties = {
         "logging.level.zipkin2=DEBUG",
         "logging.level.io.micrometer.tracing=DEBUG",
-        "logging.level.brave=DEBUG"
+        "logging.level.brave=DEBUG",
+        "management.tracing.sampling.probability=1.0"
     })
 class TracingIT {
 
