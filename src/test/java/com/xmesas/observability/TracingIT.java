@@ -59,7 +59,7 @@ class TracingIT {
         assertThat(result.status()).isEqualTo("PLACED");
         assertThat(result.traceId()).isNotBlank();
 
-        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
             // Span export to Zipkin is asynchronous, so the trace often isn't queryable yet on
             // the first poll — Zipkin returns 404 with a plain-text body (not JSON) until it is.
             // Awaitility's untilAsserted only retries on AssertionError, so the status check has
